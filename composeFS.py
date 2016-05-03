@@ -7,7 +7,18 @@ fuse.fuse_python_api=(0,2)
 import sys
 import os
 import re
-from contextlib import closing
+import io
+from contextlib import closing, contextmanager
+from unicodedata import name as uniname
+
+@contextmanager
+def redirstdout(fd):
+    hold=sys.stdout
+    sys.stdout=fd
+    try:
+        yield
+    finally:
+        sys.stdout=hold
 
 # def debugfunc(func):
 #     def blah(*args, **kwargs):
@@ -22,6 +33,27 @@ from contextlib import closing
 
 def debugfunc(func):
     return func
+
+@debugfunc
+def dictascompose(d, prefixes=None):
+    if prefixes is None:
+        prefixes=[]
+    for (k,v) in d.iteritems():
+        # ComposeFuse.DBG.write("item: k={0}\n".format(k))
+        if isinstance(v, basestring):
+            sys.stdout.write(u' '.join(u'<{0}>'.format(unicode(_)) for _ in prefixes))
+            sys.stdout.write(u' <{}>\t:\t"{}"'.format(k,v))
+            if len(v)==1:
+                try:
+                    sys.stdout.write(u'\tU{:04X}\t# {}\n'.format(ord(v), uniname(v)))
+                except ValueError:
+                    sys.stdout.write(u'\tU{:04X}\t# {}\n'.format(ord(v), "????"))
+            else:
+                sys.stdout.write(u"\n")
+        elif isinstance(v, dict):
+            dictascompose(v, prefixes+[k])
+        # else:
+        #     ComposeFuse.DBG.write("Weird type! {0}\n".format(str(type(v))))
 
 # Copied in from treeprint.py and tweaked/improved
 def readfile(filename):
@@ -68,7 +100,7 @@ def readfile(filename):
     return listing
 
 class ComposeFuse(Fuse):
-    
+    # DBG=open("TREEDUMP","w")
     def __init__(self, *args, **kwargs):
         Fuse.__init__(self, *args, **kwargs)
 
@@ -77,7 +109,7 @@ class ComposeFuse(Fuse):
         self.listing=readfile(self.infile)
         self.encoding=getattr(self, 'encoding', 'utf8')
         self.errors=getattr(self, 'errors', 'strict')
-        self.outfile=getattr(self, 'outfile', 'XCOMPOSE-OUT.compose')
+        self.outfile=getattr(self, 'outfile', None)
         import codecs
         try:
             codecs.getencoder(self.encoding)
@@ -89,8 +121,16 @@ class ComposeFuse(Fuse):
 
     @debugfunc
     def fsdestroy(self):
-        # Output Compose file from fs!
-        pass
+        if self.outfile:
+            with closing(io.open(self.outfile,"w",encoding='utf-8',newline=u"\n")) as fd:
+                with redirstdout(fd):
+                    try:
+                        dictascompose(self.listing)
+                        print
+                        print repr(self.listing)
+                    except (Exception, Error) as E:
+                        pass
+                        # self.DBG.write(str(E))
 
     @staticmethod
     def getParts(path):
@@ -231,7 +271,7 @@ class ComposeFuse(Fuse):
             return -fuse.EISDIR
         # Wait, do subscripting or encoding first?
         return elt[offset:offset+size+1].encode(self.encoding, self.errors)
- 
+
     @debugfunc
     def release(self, path, flags):
         return 0

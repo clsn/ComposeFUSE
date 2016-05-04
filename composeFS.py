@@ -56,47 +56,48 @@ def dictascompose(d, prefixes=None):
         #     ComposeFuse.DBG.write("Weird type! {0}\n".format(str(type(v))))
 
 # Copied in from treeprint.py and tweaked/improved
-def readfile(filename):
+def readfile(*files):
     listing={}
 
-    with closing(open(filename,"r")) as fd:
-        for line in fd:
-            line=line.decode('utf-8')
-            # print "((%s))"%line
-            startpos=0
-            name=[]
-            dupsfound=[]
-            while True:
-                m=re.match("\s*<(\w+)>",line[startpos:])
+    for filename in files:
+        with closing(open(filename,"r")) as fd:
+            for line in fd:
+                line=line.decode('utf-8')
+                # print "((%s))"%line
+                startpos=0
+                name=[]
+                dupsfound=[]
+                while True:
+                    m=re.match("\s*<(\w+)>",line[startpos:])
+                    if not m:
+                        break
+                    word=m.group(1)
+                    name.append(str(word)) # The keys are ordinary strings, not unicode
+                    startpos+=m.end()
+                if startpos<=0:
+                    continue
+                m=re.match(r'[^"]*"(.+?)"',line)
                 if not m:
-                    break
-                word=m.group(1)
-                name.append(str(word)) # The keys are ordinary strings, not unicode
-                startpos+=m.end()
-            if startpos<=0:
-                continue
-            m=re.match(r'[^"]*"(.+?)"',line)
-            if not m:
-                # shouldn't happen, but just in case
-                val='???'
-                print "couldn't make sense of line: "+line
-            else:
-                val=m.group(1)
-            cur=listing
-            for elt in name[:-1]:
-                if type(cur)==dict:
-                    if not cur.has_key(elt):
-                        cur[elt]={}
-                    cur=cur[elt]        # This will fail for prefix conflicts
+                    # shouldn't happen, but just in case
+                    val='???'
+                    print "couldn't make sense of line: "+line
                 else:
-                    break           # prefix conflict
-            # Presumably by now we're at the end, pointing to an empty dict.
-            if type(cur)==dict:
-                cur[name[-1]]=val
-            else:
-                # fail.  Prefix conflict.  Let's ignore it.
-                pass
-    print(repr(listing))
+                    val=m.group(1)
+                cur=listing
+                for elt in name[:-1]:
+                    if type(cur)==dict:
+                        if not cur.has_key(elt):
+                            cur[elt]={}
+                        cur=cur[elt]        # This will fail for prefix conflicts
+                    else:
+                        break           # prefix conflict
+                # Presumably by now we're at the end, pointing to an empty dict.
+                if type(cur)==dict:
+                    cur[name[-1]]=val
+                else:
+                    # fail.  Prefix conflict.  Let's ignore it.
+                    pass
+    #print(repr(listing))
     return listing
 
 class ComposeFuse(Fuse):
@@ -106,7 +107,9 @@ class ComposeFuse(Fuse):
 
     @debugfunc
     def fsinit(self):
-        self.listing=readfile(self.infile)
+        infiles=self.infile.split('|')
+        self.listing=readfile(*infiles)
+        print(repr(self.listing))
         self.encoding=getattr(self, 'encoding', 'utf8')
         self.errors=getattr(self, 'errors', 'strict')
         self.outfile=getattr(self, 'outfile', None)

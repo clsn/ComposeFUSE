@@ -35,25 +35,41 @@ def debugfunc(func):
     return func
 
 @debugfunc
-def dictascompose(d, prefixes=None):
+def dictascompose(d, prefixes=None, stream=sys.stdout):
     if prefixes is None:
         prefixes=[]
     for (k,v) in d.iteritems():
         # ComposeFuse.DBG.write("item: k={0}\n".format(k))
         if isinstance(v, basestring):
-            sys.stdout.write(u' '.join(u'<{0}>'.format(unicode(_)) for _ in prefixes))
-            sys.stdout.write(u' <{}>\t:\t"{}"'.format(k,v))
+            stream.write(u' '.join(u'<{0}>'.format(unicode(_)) for _ in prefixes))
+            stream.write(u' <{}>\t:\t"{}"'.format(k,v))
             if len(v)==1:
                 try:
-                    sys.stdout.write(u'\tU{:04X}\t# {}\n'.format(ord(v), uniname(v)))
+                    stream.write(u'\tU{:04X}\t# {}\n'.format(ord(v), uniname(v)))
                 except ValueError:
-                    sys.stdout.write(u'\tU{:04X}\t# {}\n'.format(ord(v), "????"))
+                    stream.write(u'\tU{:04X}\t# {}\n'.format(ord(v), "????"))
             else:
-                sys.stdout.write(u"\n")
+                stream.write(u"\n")
         elif isinstance(v, dict):
-            dictascompose(v, prefixes+[k])
+            dictascompose(v, prefixes=prefixes+[k], stream=stream)
         # else:
         #     ComposeFuse.DBG.write("Weird type! {0}\n".format(str(type(v))))
+
+
+# This is actually a potentially useful general-purpose function.  Not using
+# it here, though.  Still.
+def flattendict(dct, prefixes=None, rv=None):
+    """Take nested dict and return flattened version"""
+    if rv is None:
+        rv={}
+    if prefixes is None:
+        prefixes=[]
+    for (k, v) in dct.iteritems():
+        if isinstance(v, dict):
+            flattendict(v, prefixes+[k], rv)
+        else:
+            rv[tuple(prefixes+[k])]=v
+    return rv
 
 # Copied in from treeprint.py and tweaked/improved
 def readfile(*files):
@@ -80,7 +96,7 @@ def readfile(*files):
                 if not m:
                     # shouldn't happen, but just in case
                     val='???'
-                    print "couldn't make sense of line: "+line
+                    print("couldn't make sense of line: "+line)
                 else:
                     val=m.group(1)
                 cur=listing
@@ -108,11 +124,19 @@ class ComposeFuse(Fuse):
     @debugfunc
     def fsinit(self):
         infiles=self.infile.split('|')
-        self.listing=readfile(*infiles)
+        self.listing=readfile(*list(os.path.expanduser(_) for _ in infiles))
         print(repr(self.listing))
         self.encoding=getattr(self, 'encoding', 'utf8')
         self.errors=getattr(self, 'errors', 'strict')
         self.outfile=getattr(self, 'outfile', None)
+        if self.outfile is not None:
+            self.outfile=os.path.expanduser(self.outfile)
+            try:
+                if not os.path.isabs(self.outfile[0]):
+                    self.outfile = os.path.abspath(self.outfile)
+            except IndexError:
+                # If it's the null string--if they just say outfile=
+                self.outfile = os.path.abspath("COMPOSEDUMP")
         import codecs
         try:
             codecs.getencoder(self.encoding)
@@ -125,15 +149,13 @@ class ComposeFuse(Fuse):
     @debugfunc
     def fsdestroy(self):
         if self.outfile:
-            with closing(io.open(self.outfile,"w",encoding='utf-8',newline=u"\n")) as fd:
-                with redirstdout(fd):
-                    try:
-                        dictascompose(self.listing)
-                        print
-                        print repr(self.listing)
-                    except (Exception, Error) as E:
-                        pass
-                        # self.DBG.write(str(E))
+            try:
+                with closing(io.open(self.outfile,"w",encoding='utf-8',newline=u"\n")) as fd:
+                    dictascompose(self.listing, stream=fd)
+                    print()
+                    print(repr(self.listing))
+            except (Exception, Error) as E:
+                pass
 
     @staticmethod
     def getParts(path):
@@ -182,10 +204,10 @@ class ComposeFuse(Fuse):
         if elt is None:
             return -fuse.ENOENT
         if self.is_directory(None, pathelts):
-            st.st_mode=stat.S_IFDIR | 0755
+            st.st_mode=stat.S_IFDIR | 0o755
             st.st_nlink=2
         else:
-            st.st_mode=stat.S_IFREG | 0644
+            st.st_mode=stat.S_IFREG | 0o644
             st.st_nlink=1
             st.st_size=len(elt.encode(self.encoding, self.errors))
         st.st_ino=0
@@ -295,13 +317,16 @@ class ComposeFuse(Fuse):
     def chmod(self, *args):
         pass
 
-server=ComposeFuse(version="%prog "+fuse.__version__,
-                   usage='', dash_s_do='setsingle')
-server.path=os.getenv('PWD')
-server.parser.add_option(mountopt="infile")
-server.parser.add_option(mountopt="outfile")
-server.parser.add_option(mountopt="encoding")
-server.parser.add_option(mountopt="errors")
-server.parse(errex=1, values=server)
-server.fsinit()
-server.main()
+try:
+    server=ComposeFuse(version="%prog "+fuse.__version__,
+                       usage='', dash_s_do='setsingle')
+    server.path=os.getcwd()
+    server.parser.add_option(mountopt="infile")
+    server.parser.add_option(mountopt="outfile")
+    server.parser.add_option(mountopt="encoding")
+    server.parser.add_option(mountopt="errors")
+    server.parse(errex=1, values=server)
+    server.fsinit()
+    server.main()
+except AttributeError:           # Catch python -i calls
+    pass

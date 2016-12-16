@@ -151,6 +151,8 @@ def readfile(*files):
 
 class ComposeFuse(Fuse):
     # DBG=open("/home/mark/xcompose/TREEDUMP","w")
+
+    fieldsep='-'
     def __init__(self, *args, **kwargs):
         Fuse.__init__(self, *args, **kwargs)
 
@@ -230,6 +232,13 @@ class ComposeFuse(Fuse):
     @debugfunc
     def getattr(self, path):
         st=Stat()
+        suffix=None
+        # The names are very limited, and this only happens for leaves.
+        try:
+            (realpath,suffix)=path.rsplit(self.fieldsep,1)
+            path=realpath
+        except ValueError:
+            pass
         pathelts=self.getParts(path)
         elt=self.followpath(pathelts)
         if elt is None:
@@ -238,22 +247,25 @@ class ComposeFuse(Fuse):
             st.st_mode=stat.S_IFDIR | 0o755
             st.st_nlink=2
             st.st_ctime=0
-        elif isinstance(elt, list):
-            st.st_mode=stat.S_IFREG | 0o644
-            st.st_nlink=1
-            st.st_size=len(elt)
-            st.st_ctime=1
+            st.st_atime=0
+            st.st_mtime=0
         else:
             st.st_mode=stat.S_IFREG | 0o644
             st.st_nlink=1
-            st.st_size=len(elt[0].encode(self.encoding, self.errors))
-            st.st_ctime=elt[1]
+            st.st_size=len(elt[0].encode(self.encoding))
+            st.st_ctime=elt[1]*3600*24
+            st.st_atime=st.st_ctime
+            st.st_mtime=st.st_ctime
+            if suffix=='COMMENTS':
+                st.st_size=len(elt[2].encode(self.encoding))
+            elif suffix=='INLINE':
+                st.st_size=len(elt[3].encode(self.encoding))
+            elif suffix:        # not one of the allowed ones.
+                return -fuse.ENOENT
         st.st_ino=0
         st.st_def=0
         st.st_uid=0
         st.st_gid=0
-        st.st_atime=0
-        st.st_mtime=0
         return st
 
     @debugfunc
@@ -276,6 +288,11 @@ class ComposeFuse(Fuse):
         yield fuse.Direntry('..')
         entries=sorted(elt.keys())
         for en in entries:
+            if not isinstance(elt[en], dict):
+                if elt[en][2]:  # Has comments.
+                    yield fuse.Direntry(en+self.fieldsep+"COMMENTS")
+                if elt[en][3]:  # Has inline
+                    yield fuse.Direntry(en+self.fieldsep+"INLINE")
             yield fuse.Direntry(en)
         return
 
@@ -296,6 +313,13 @@ class ComposeFuse(Fuse):
 
     @debugfunc
     def unlink(self, path):
+        # Unlinking an entry removes its comments as well, etc.
+        suffix=None
+        try:
+            (realpath,suffix)=path.rsplit(self.fieldsep,1)
+            path=realpath
+        except ValueError:
+            pass
         pathelts=self.getParts(path)
         parent=self.followpath(pathelts[:-1])
         del parent[pathelts[-1]]
@@ -314,23 +338,49 @@ class ComposeFuse(Fuse):
 
     @debugfunc
     def write(self, path, buf, offset):
+        suffix=None
+        try:
+            (realpath,suffix)=path.rsplit(self.fieldsep,1)
+            path=realpath
+        except ValueError:
+            pass
         pathelts=self.getParts(path)
         parent=self.followpath(pathelts[:-1])
         item=parent.get(pathelts[-1], '')
         if isinstance(item, dict):
             return -fuse.EISDIR
-        # Ah, screw offsets.
-        parent[pathelts[-1]]=(buf, 1000000) # all same large data?
-        return len(buf)
+        # The item is a tuple, can't replace it in pieces.
+        newitem=list(item)
+        # Val, lineno, comments, inline
+        if suffix=="COMMENTS":
+            newitem[2]=unicode(buf) # offset?
+        elif suffix=="INLINE":
+            newitem[3]=unicode(buf)
+        elif suffix:
+            return -fuse.ENOENT
+        else:
+            newitem[0]=unicode(buf)
+        parent[pathelts[-1]]=tuple(newitem)
+        return len(unicode(buf).encode(self.encoding))
 
     def truncate(self, path, length):
         return 0                # Whatever...
 
     @debugfunc
     def read(self, path, size, offset):
+        suffix=None
+        try:
+            (realpath,suffix)=path.rsplit(self.fieldsep,1)
+            path=realpath
+        except ValueError:
+            pass
         elt=self.followpath(self.getParts(path))
         if isinstance(elt, dict):
             return -fuse.EISDIR
+        if suffix=='COMMENTS':
+            return elt[2][offset:offset+size+1].encode(self.encoding)
+        elif suffix=='INLINE':
+            return elt[3][offset:offset+size+1].encode(self.encoding)
         # Wait, do subscripting or encoding first?
         return elt[0][offset:offset+size+1].encode(self.encoding, self.errors)
 

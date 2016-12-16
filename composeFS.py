@@ -10,6 +10,7 @@ import re
 import io
 from contextlib import closing, contextmanager
 from unicodedata import name as uniname
+from functools import update_wrapper
 
 @contextmanager
 def redirstdout(fd):
@@ -20,44 +21,26 @@ def redirstdout(fd):
     finally:
         sys.stdout=hold
 
+# def DBGmsg(msg):
+#    ComposeFuse.DBG.write(msg)
+#    ComposeFuse.DBG.flush()
+def DBGmsg(msg):
+    pass
+
 # def debugfunc(func):
 #     def blah(*args, **kwargs):
-#         ComposeFuse.DBG.write("Entering %s(%s :: %s)\n"%(func.func_name,
+#         DBGmsg("Entering %s(%s :: %s)\n"%(func.func_name,
 #                                                          repr(args),
 #                                                          repr(kwargs)))
 #         rv=func(*args, **kwargs)
-#         ComposeFuse.DBG.write("Leaving %s (%s)\n"%(func.func_name, repr(rv)[:100]))
-#         ComposeFuse.DBG.flush()
+#         DBGmsg("Leaving %s (%s)\n"%(func.func_name, repr(rv)[:100]))
 #         return rv
-#     return blah
+#     return update_wrapper(blah,func)
 
+# Dummy decorator.
 def debugfunc(func):
     return func
 
-@debugfunc
-def dictascompose(d, prefixes=None, stream=sys.stdout):
-    if prefixes is None:
-        prefixes=[]
-    for (k,v) in d.iteritems():
-        # ComposeFuse.DBG.write("item: k={0}\n".format(k))
-        if isinstance(v, basestring):
-            stream.write(u' '.join(u'<{0}>'.format(unicode(_)) for _ in prefixes))
-            stream.write(u' <{}>\t:\t"{}"'.format(k,v))
-            if len(v)==1:
-                try:
-                    stream.write(u'\tU{:04X}\t# {}\n'.format(ord(v), uniname(v)))
-                except ValueError:
-                    stream.write(u'\tU{:04X}\t# {}\n'.format(ord(v), "????"))
-            else:
-                stream.write(u"\n")
-        elif isinstance(v, dict):
-            dictascompose(v, prefixes=prefixes+[k], stream=stream)
-        # else:
-        #     ComposeFuse.DBG.write("Weird type! {0}\n".format(str(type(v))))
-
-
-# This is actually a potentially useful general-purpose function.  Not using
-# it here, though.  Still.
 def flattendict(dct, prefixes=None, rv=None):
     """Take nested dict and return flattened version"""
     if rv is None:
@@ -71,15 +54,53 @@ def flattendict(dct, prefixes=None, rv=None):
             rv[tuple(prefixes+[k])]=v
     return rv
 
+def flatascompose(dct, stream=sys.stdout):
+    # dct comes in as a flattened dictionary of
+    # {(tuple of keys):(value, lineno, preceding-comments)}.  Want to output
+    # it in order of lineno.
+    try:
+        #  XXX Gonna have to change for py3
+        allentries=sorted(dct.items(), cmp=lambda a,b : cmp(a[1][1],
+                                                            b[1][1]))
+        for ent in allentries:
+            try:
+                (key, data)=ent
+                (val, lineno, comments, inline)=data
+                stream.write(unicode(comments))
+                stream.write(u' '.join(u'<{0}>'.format(unicode(_)) for _ in key))
+                stream.write(u'\t:\t"{}"'.format(val))
+                if inline:
+                    if len(val)==1:
+                        stream.write(u"\tU{:04X}\t## {}\n".format(ord(val),
+                                                                  inline))
+                    else: 
+                        stream.write(u'\t## {}\n'.format(inline))
+                elif len(val)==1:
+                    try:
+                        stream.write(u'\tU{:04X}\t# {}\n'.format(ord(val), 
+                                                                 uniname(val)))
+                    except ValueError:
+                        stream.write(u'\tU{:04X}\t# {}\n'.format(ord(val), "????"))
+                else:
+                    stream.write(u"\n")
+            except (Exception,Error) as E:
+                pass
+    except (Exception,Error) as E:
+        DBGmsg(u"AAH! "+str(E)+u"\n")
+    finally:
+        DBGmsg(u"\nAnd done now.\n")
+
 # Copied in from treeprint.py and tweaked/improved
 def readfile(*files):
     listing={}
+    linecount=0
+    comments=""
 
     for filename in files:
         with closing(open(filename,"r")) as fd:
             for line in fd:
+                linecount+=1
                 line=line.decode('utf-8')
-                # print "((%s))"%line
                 startpos=0
                 name=[]
                 dupsfound=[]
@@ -91,14 +112,21 @@ def readfile(*files):
                     name.append(str(word)) # The keys are ordinary strings, not unicode
                     startpos+=m.end()
                 if startpos<=0:
+                    comments+=line
                     continue
-                m=re.match(r'[^"]*"(.+?)"',line)
+                m=re.match(ur'[^"]*"(.+?)"',line)
                 if not m:
                     # shouldn't happen, but just in case
-                    val='???'
+                    val=u'???'
                     print("couldn't make sense of line: "+line)
                 else:
-                    val=m.group(1)
+                    val=unicode(m.group(1))
+                # Can't otherwise distinguish between auto-inlines and custom...
+                m=re.search(ur'## *(.*)$', line)
+                if m:
+                    inline=unicode(m.group(1))
+                else:
+                    inline=u""
                 cur=listing
                 for elt in name[:-1]:
                     if type(cur)==dict:
@@ -109,15 +137,20 @@ def readfile(*files):
                         break           # prefix conflict
                 # Presumably by now we're at the end, pointing to an empty dict.
                 if type(cur)==dict:
-                    cur[name[-1]]=val
+                    cur[name[-1]]=(val, linecount,
+                                   comments, inline)
+                    comments=""
+                    inline=""
                 else:
                     # fail.  Prefix conflict.  Let's ignore it.
                     pass
     #print(repr(listing))
+    if comments:                # Ending comments
+        listing[" ENDING "]=(u"", lineno, comments)
     return listing
 
 class ComposeFuse(Fuse):
-    # DBG=open("TREEDUMP","w")
+    # DBG=open("/home/mark/xcompose/TREEDUMP","w")
     def __init__(self, *args, **kwargs):
         Fuse.__init__(self, *args, **kwargs)
 
@@ -151,9 +184,7 @@ class ComposeFuse(Fuse):
         if self.outfile:
             try:
                 with closing(io.open(self.outfile,"w",encoding='utf-8',newline=u"\n")) as fd:
-                    dictascompose(self.listing, stream=fd)
-                    print()
-                    print(repr(self.listing))
+                    flatascompose(flattendict(self.listing), stream=fd)
             except (Exception, Error) as E:
                 pass
 
@@ -206,17 +237,23 @@ class ComposeFuse(Fuse):
         if self.is_directory(None, pathelts):
             st.st_mode=stat.S_IFDIR | 0o755
             st.st_nlink=2
+            st.st_ctime=0
+        elif isinstance(elt, list):
+            st.st_mode=stat.S_IFREG | 0o644
+            st.st_nlink=1
+            st.st_size=len(elt)
+            st.st_ctime=1
         else:
             st.st_mode=stat.S_IFREG | 0o644
             st.st_nlink=1
-            st.st_size=len(elt.encode(self.encoding, self.errors))
+            st.st_size=len(elt[0].encode(self.encoding, self.errors))
+            st.st_ctime=elt[1]
         st.st_ino=0
         st.st_def=0
         st.st_uid=0
         st.st_gid=0
         st.st_atime=0
         st.st_mtime=0
-        st.st_ctime=0
         return st
 
     @debugfunc
@@ -283,7 +320,7 @@ class ComposeFuse(Fuse):
         if isinstance(item, dict):
             return -fuse.EISDIR
         # Ah, screw offsets.
-        parent[pathelts[-1]]=buf
+        parent[pathelts[-1]]=(buf, 1000000) # all same large data?
         return len(buf)
 
     def truncate(self, path, length):
@@ -295,7 +332,7 @@ class ComposeFuse(Fuse):
         if isinstance(elt, dict):
             return -fuse.EISDIR
         # Wait, do subscripting or encoding first?
-        return elt[offset:offset+size+1].encode(self.encoding, self.errors)
+        return elt[0][offset:offset+size+1].encode(self.encoding, self.errors)
 
     @debugfunc
     def release(self, path, flags):

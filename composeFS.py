@@ -64,6 +64,9 @@ def flatascompose(dct, stream=sys.stdout):
                 (key, data)=ent
                 (val, lineno, comments, inline)=data
                 stream.write(str(comments))
+                # Catch "Ending" special-case
+                if not val:
+                    continue
                 stream.write(u' '.join(u'<{0}>'.format(str(_)) for _ in key))
                 stream.write(u'\t:\t"{}"'.format(val))
                 if inline:
@@ -142,8 +145,8 @@ def readfile(*files):
                     # fail.  Prefix conflict.  Let's ignore it.
                     pass
     #print(repr(listing))
-    if comments:                # Ending comments
-        listing[" ENDING "]=(u"", lineno, comments)
+    if comments:                # Ending comments; dummy entry
+        listing["ENDING"]=(u"", linecount, comments, "")
     return listing
 
 class ComposeFuse(fuse.Operations):
@@ -340,13 +343,13 @@ class ComposeFuse(fuse.Operations):
         newitem=list(item)
         # Val, lineno, comments, inline
         if suffix=="COMMENTS":
-            newitem[2]=str(buf) # offset?
+            newitem[2]=buf.decode('utf-8') # offset? Catch exceptions?
         elif suffix=="INLINE":
-            newitem[3]=str(buf)
+            newitem[3]=buf.decode('utf-8')
         elif suffix:
             raise fuse.FuseOSError(fuse.ENOENT)
         else:
-            newitem[0]=str(buf)
+            newitem[0]=buf.decode('utf-8')
         parent[pathelts[-1]]=tuple(newitem)
         return len(str(buf).encode(self.encoding))
 
@@ -394,8 +397,12 @@ if __name__ == '__main__':
     # simple parsing, not bothering with true option parser.
     # infile, outfile, [encoding], [errors]
     if sys.argv[1].startswith("-o"):
-        mntpt=sys.argv[2]
-        for opt in sys.argv[1][2:].split(","):
+        opts=sys.argv.pop(1)
+        if opts=='-o':
+            opts=sys.argv.pop(1)
+        else:
+            opts=opts[2:]
+        for opt in opts.split(","):
             try:
                 nam, val = opt.split('=',2)
             except ValueError:
@@ -412,4 +419,5 @@ if __name__ == '__main__':
     if not hasattr(server, 'infile') or not server.infile:
         print("Need infile.")
         exit(1)
-    fu=fuse.FUSE(server, mntpt, foreground=False, nothreads=True)
+    fu=fuse.FUSE(server, mntpt, foreground=hasattr(server,'foreground'),
+                 nothreads=True)

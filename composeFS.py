@@ -57,7 +57,6 @@ def flatascompose(dct, stream=sys.stdout):
     # {(tuple of keys):(value, lineno, preceding-comments)}.  Want to output
     # it in order of lineno.
     try:
-        #  XXX Gonna have to change for py3
         allentries=sorted(dct.items(), key=lambda x: x[1][1])
         for ent in allentries:
             try:
@@ -286,20 +285,33 @@ class ComposeFuse(fuse.Operations):
             yield en
         return
 
+    # Do I even need this?
+    # @debugfunc
+    # def mknod(self, path, mode, dev):
+    #     if mode & stat.S_IFREG and dev==0:
+    #         pathelts=self.getParts(path)
+    #         parent=self.followpath(pathelts[:-1])
+    #         if parent is None:
+    #             raise fuse.FuseOSError(fuse.ENOENT)
+    #         if not isinstance(parent, dict):
+    #             raise fuse.FuseOSError(fuse.EEXIST)
+    #         if pathelts[-1] in parent:
+    #             raise fuse.FuseOSError(fuse.EEXIST)
+    #         parent[pathelts[-1]]=''
+    #     else:
+    #         raise fuse.FuseOSError(fuse.ENOSYS)
+
+
     @debugfunc
-    def mknod(self, path, mode, dev):
-        if mode & stat.S_IFREG and dev==0:
-            pathelts=self.getParts(path)
-            parent=self.followpath(pathelts[:-1])
-            if parent is None:
-                raise fuse.FuseOSError(fuse.ENOENT)
-            if not isinstance(parent, dict):
-                raise fuse.FuseOSError(fuse.EEXIST)
-            if pathelts[-1] in parent:
-                raise fuse.FuseOSError(fuse.EEXIST)
-            parent[pathelts[-1]]=''
-        else:
-            raise fuse.FuseOSError(fuse.ENOSYS)
+    def create(self, path, mode):
+        pathelts=self.getParts(path)
+        elt=self.followpath(pathelts[:-1])
+        if elt is None or not isinstance(elt, dict):
+            raise fuse.FuseOSError(fuse.ENOENT)
+        if pathelts[-1] in elt:
+            raise fuse.FuseOSError(fuse.EEXIST)
+        elt[pathelts[-1]]=("", 10000, "", "") # why _not_ 10,000?
+        return 0
 
     @debugfunc
     def unlink(self, path):

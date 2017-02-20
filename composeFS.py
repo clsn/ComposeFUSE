@@ -52,6 +52,8 @@ def flattendict(dct, prefixes=None, rv=None):
             rv[tuple(prefixes+[k])]=v
     return rv
 
+COUNTFILE='.linecount'
+
 def flatascompose(dct, stream=sys.stdout):
     # dct comes in as a flattened dictionary of
     # {(tuple of keys):(value, lineno, preceding-comments)}.  Want to output
@@ -63,6 +65,8 @@ def flatascompose(dct, stream=sys.stdout):
                 (key, data)=ent
                 (val, lineno, comments, inline)=data
                 stream.write(str(comments))
+                if key[-1]==COUNTFILE:
+                    continue
                 # Catch "Ending" special-case
                 if not val:
                     continue
@@ -146,6 +150,7 @@ def readfile(*files):
     #print(repr(listing))
     if comments:                # Ending comments; dummy entry
         listing["ENDING"]=(u"", linecount, comments, "")
+    listing[COUNTFILE]=(str(linecount), linecount, "", "")
     return listing
 
 class ComposeFuse(fuse.Operations):
@@ -243,18 +248,22 @@ class ComposeFuse(fuse.Operations):
                     st_atime=0,
                     st_mtime=0)
         else:
+            # Use ls -l --time-style="+%s"
             st=dict(st_mode=stat.S_IFREG | 0o644,
                     st_nlink=1,
                     st_size=len(elt[0].encode(self.encoding)),
-                    st_ctime=elt[1]*3600*24,
-                    st_atime=elt[1]*3600*24,
-                    st_mtime=elt[1]*3600*24)
+                    st_ctime=elt[1],
+                    st_atime=elt[1],
+                    st_mtime=elt[1])
             if suffix=='COMMENTS':
                 st['st_size']=len(elt[2].encode(self.encoding))
             elif suffix=='INLINE':
                 st['st_size']=len(elt[3].encode(self.encoding))
             elif suffix:        # not one of the allowed ones.
                 raise fuse.FuseOSError(fuse.ENOENT)
+            # Doesn't seem to accomplish much:
+            if pathelts[-1]==COUNTFILE:
+                st['st_mode'] = stat.S_IFREG | 0o444 # read-only special case
         st['st_ino']=0
         st['st_def']=0
         st['st_uid']=0
@@ -310,7 +319,12 @@ class ComposeFuse(fuse.Operations):
             raise fuse.FuseOSError(fuse.ENOENT)
         if pathelts[-1] in elt:
             raise fuse.FuseOSError(fuse.EEXIST)
-        elt[pathelts[-1]]=("", 10000, "", "") # why _not_ 10,000?
+        try:
+            lc=self.listing[COUNTFILE][1] + 1
+            self.listing[COUNTFILE]=(str(lc), lc, "", "")
+        except KeyError:
+            lc=10000 # why _not_ 10,000?
+        elt[pathelts[-1]]=("", lc, "", "")
         return 0
 
     @debugfunc

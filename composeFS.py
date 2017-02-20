@@ -412,8 +412,7 @@ if __name__ == '__main__':
             # If you abuse this to overwrite stuff the class needs,
             # you deserve whatever you get.
             setattr(server, nam, val)
-    else:
-        mntpt=sys.argv[1]
+    mntpt=sys.argv[1]
 
 
     if not hasattr(server, 'infile') or not server.infile:

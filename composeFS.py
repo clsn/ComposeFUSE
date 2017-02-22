@@ -154,7 +154,7 @@ def readfile(*files):
     return listing
 
 class ComposeFuse(fuse.Operations):
-    DBG=open("/home/mark/xcompose/TREEDUMP","w")
+    # DBG=open(os.getenv('HOME')+os.sep+"XCOMPDBG","w")
 
     fieldsep='-'
 
@@ -293,23 +293,6 @@ class ComposeFuse(fuse.Operations):
                     yield en+self.fieldsep+"INLINE"
             yield en
         return
-
-    # Do I even need this?
-    # @debugfunc
-    # def mknod(self, path, mode, dev):
-    #     if mode & stat.S_IFREG and dev==0:
-    #         pathelts=self.getParts(path)
-    #         parent=self.followpath(pathelts[:-1])
-    #         if parent is None:
-    #             raise fuse.FuseOSError(fuse.ENOENT)
-    #         if not isinstance(parent, dict):
-    #             raise fuse.FuseOSError(fuse.EEXIST)
-    #         if pathelts[-1] in parent:
-    #             raise fuse.FuseOSError(fuse.EEXIST)
-    #         parent[pathelts[-1]]=''
-    #     else:
-    #         raise fuse.FuseOSError(fuse.ENOSYS)
-
 
     @debugfunc
     def create(self, path, mode):

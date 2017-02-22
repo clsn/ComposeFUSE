@@ -1,0 +1,43 @@
+* ComposeFUSE
+
+View your .XCompose file as a file-system---though God only knows why you'd want to.
+
+This program presents the contents of a =.XCompose= file as if it were a file-system.  The directories represent keystrokes down to a file, which contains the character(s) rendered.  That is, if you take the path down to a leaf (a file), the names of the directories (and the file) will be the keys you need to press to get that character.
+
+So if your =.XCompose= file contains a line that says
+
+:    <Multi_key> <colon> <minus> <parenright> : "☺"  U263A
+
+then your directory tree will look like:
+
+:    (mount-point)
+:        Multi_key/
+:            colon/
+:                minus/
+:                    parenright
+
+and the file "parenright" would contain the single character ☺.
+
+The program also displays your comments: all the comment lines before a given entry are placed in a file which has the same name as the file for that entry (i.e. the name of the last keystroke) suffixed with =-COMMENTS=, and inline comments at the end of the line are in a file suffixed with =-INLINE=.
+
+All this is useful because when you unmount the directory tree, CompuseFUSE can write the information back out to a new file in =.XCompose= format, in the order it originally was and with the comments and everything, so you can actually edit the file by messing around with the directory tree.
+
+** Other important things I haven't written yet
+
+*** Format of lines
+
+:    Keys  : "char" UF00F  # UNICODE CHARACTER NAME
+
+*** Double-#'s are important somehow
+
+They distinguish between stock inline comments with the Unicode character name and custom inline comments.
+
+*** How to use
+
+Something like
+
+:   composeFS.py -o infile=$HOME/.XCompose,outfile=ThisOutFile /mount/point
+
+*** Why?
+
+Because.

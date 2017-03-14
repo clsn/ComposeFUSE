@@ -70,17 +70,20 @@ def flatascompose(dct, stream=sys.stdout):
                 # Catch "Ending" special-case
                 if not val:
                     continue
+                # split keys on commas and flatten:
+                # http://stackoverflow.com/questions/952914/making-a-flat-list-out-of-list-of-lists-in-python
+                key=[item for sublist in [x.split(",") for x in key] for item in sublist]
                 stream.write(u' '.join(u'<{0}>'.format(str(_)) for _ in key))
                 stream.write(u'\t:\t"{}"'.format(val))
                 if inline:
                     if len(val)==1:
                         stream.write(u"\tU{:04X}\t## {}\n".format(ord(val),
                                                                   inline))
-                    else: 
+                    else:
                         stream.write(u'\t## {}\n'.format(inline))
                 elif len(val)==1:
                     try:
-                        stream.write(u'\tU{:04X}\t# {}\n'.format(ord(val), 
+                        stream.write(u'\tU{:04X}\t# {}\n'.format(ord(val),
                                                                  uniname(val)))
                     except ValueError:
                         stream.write(u'\tU{:04X}\t# {}\n'.format(ord(val), "????"))
@@ -92,6 +95,28 @@ def flatascompose(dct, stream=sys.stdout):
         DBGmsg(u"AAH! "+str(E)+u"\n")
     finally:
         DBGmsg(u"\nAnd done now.\n")
+
+def compressdict(dct):
+    """Take a dict in usual form and *destructively* modify it so as to
+    compress nests of one-element dictionaries into keys made of
+    comma-separate elements.  Also returns the dictionary; works
+    recursively.
+    """
+    if isinstance(dct, dict):
+        for k,v in dct.items():
+            if isinstance(v, dict):
+                if len(v) == 1:
+                    # is there a better way to do this or tell we're done?
+                    # This works!?  OK then.
+                    currkey=None
+                    while isinstance(v, dict) and currkey!=next(iter(v.keys())):
+                        currkey=next(iter(v.keys()))
+                        dct[k+","+currkey] = v = compressdict(next(iter(v.values())))
+                        del dct[k]
+                        k=k+","+currkey
+                else:
+                    dct[k] = compressdict(v)
+    return dct
 
 # Copied in from treeprint.py and tweaked/improved
 def readfile(*files):
@@ -162,6 +187,8 @@ class ComposeFuse(fuse.Operations):
     def init(self, *args):
         infiles=self.infile.split('|')
         self.listing=readfile(*list(os.path.expanduser(_) for _ in infiles))
+        if getattr(self, 'compress', False):
+            self.listing=compressdict(self.listing)
         print(repr(self.listing))
         self.encoding=getattr(self, 'encoding', 'utf8')
         self.errors=getattr(self, 'errors', 'strict')
@@ -243,7 +270,7 @@ class ComposeFuse(fuse.Operations):
             raise fuse.FuseOSError(fuse.ENOENT)
         if self.is_directory(None, pathelts):
             st=dict(st_mode=stat.S_IFDIR | 0o755,
-                    st_nlink=2,
+                    st_nlink=2+len(elt),
                     st_ctime=0,
                     st_atime=0,
                     st_mtime=0)

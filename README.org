@@ -38,6 +38,44 @@ Something like
 
 :   composeFS.py -o infile=$HOME/.XCompose,outfile=ThisOutFile /mount/point
 
+You can use multiple infiles by separating them with =|= characters---just be sure to quote them from the shell.  You should use absolute paths at least for the infile, since (when run in the background) python fuse doesn't seem to have the same notion of current directory.
+
+The =outfile= is optional.
+
+*** Controlling line placement
+
+The line number is available on a "file" as the number of *seconds* since 1 January 1970 00:00:00 (the UNIX epoch).  Use ~ls -l --time-style=+%s"﻿~ to see it.  *NOTE*: Since nobody cares about the exact number and just their relative placement counts, so in a future release this very likely will be changed to show *days* since the epoch and not seconds, so you won't have to mess around with annoying =ls= switches.  So you will be able to rearrange lines by changing their dates (with =touch=).
+
+*** Compress mode
+
+Include =compress= as one of the options in the mount and nested singleton directories will be compressed into single files (or dirs) with names consisting of all the (former) directory names separate by commas.
+
+So if your =.XCompose= file had a line like
+
+:    <Multi_key> <Multi_key> <n> <e> <p> <t> <u> <n> <e> : "♆" U2646	# NEPTUNE
+
+(and let's say nothing else that started with =<Multi_key> <Multi_key> <n>=), without =compress= your directory structure would look like:
+
+:    Multi_key/
+:        # Other Multi_key things...
+:        Multi_key/
+:            # Other Multi_key Multi_key things...
+:            n/
+:                e/
+:                    p/
+:                        t/
+:                            u/
+:                                n/
+:                                    e
+
+but with =compress= it will be:
+
+:    Multi_key/
+:        # Other Multi_key things...
+:        Multi_key/
+:            # Other Multi_key Multi_key things...
+:            n,e,p,t,u,n,e
+
 *** Why?
 
 Because.

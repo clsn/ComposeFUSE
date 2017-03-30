@@ -58,43 +58,50 @@ def flatascompose(dct, stream=sys.stdout):
     # dct comes in as a flattened dictionary of
     # {(tuple of keys):(value, lineno, preceding-comments)}.  Want to output
     # it in order of lineno.
-    try:
-        allentries=sorted(dct.items(), key=lambda x: x[1][1])
-        for ent in allentries:
-            try:
-                (key, data)=ent
-                (val, lineno, comments, inline)=data
-                stream.write(str(comments))
-                if key[-1]==COUNTFILE:
-                    continue
-                # Catch "Ending" special-case
-                if not val:
-                    continue
-                # split keys on commas and flatten:
-                # http://stackoverflow.com/questions/952914/making-a-flat-list-out-of-list-of-lists-in-python
-                key=[item for sublist in [x.split(",") for x in key] for item in sublist]
-                stream.write(u' '.join(u'<{0}>'.format(str(_)) for _ in key))
-                stream.write(u'\t:\t"{}"'.format(val))
-                if inline:
-                    if len(val)==1:
-                        stream.write(u"\tU{:04X}\t## {}\n".format(ord(val),
-                                                                  inline))
+    allentries=sorted(dct.items(), key=lambda x: x[1][1])
+    for ent in allentries:
+        try:
+            (key, data)=ent
+            (val, lineno, comments, inline)=data
+            stream.write(str(comments))
+            if key[-1]==COUNTFILE:
+                continue
+            # Catch "Ending" special-case
+            if not val:
+                continue
+            # split keys on commas and flatten:
+            # http://stackoverflow.com/questions/952914/making-a-flat-list-out-of-list-of-lists-in-python
+            key=[item for sublist in [x.split(",") for x in key] for item in sublist]
+            stream.write(u' '.join(u'<{0}>'.format(str(_)) for _ in key))
+            stream.write(u'\t:\t"{}"'.format(val))
+            if inline:
+                if len(val)==1:
+                    if inline.startswith(u"*"):
+                        try:
+                            stream.write((u"\tU{num:04X}\t"+inline[1:]+u"\n").
+                                         format(num=ord(val),
+                                                uname=uniname(val)))
+                        except ValueError:
+                            # no such name
+                            stream.write((u"\tU{num:04X}\t"+inline[1:]+u"\n").
+                                         format(num=ord(val),
+                                                uname="????"))
                     else:
-                        stream.write(u'\t## {}\n'.format(inline))
-                elif len(val)==1:
-                    try:
-                        stream.write(u'\tU{:04X}\t# {}\n'.format(ord(val),
-                                                                 uniname(val)))
-                    except ValueError:
-                        stream.write(u'\tU{:04X}\t# {}\n'.format(ord(val), "????"))
+                            stream.write(u'\tU{:04X}\t'.format(ord(val))+inline+u'\n')
                 else:
-                    stream.write(u"\n")
-            except (Exception,) as E:
-                pass
-    except (Exception,) as E:
-        DBGmsg(u"AAH! "+str(E)+u"\n")
-    finally:
-        DBGmsg(u"\nAnd done now.\n")
+                    stream.write("\t"+inline+"\n")
+            elif len(val)==1:
+                try:
+                    stream.write(u'\tU{:04X}\t# {}\n'.format(ord(val),
+                                                             uniname(val)))
+                except ValueError:
+                    stream.write(u'\tU{:04X}\t# {}\n'.format(ord(val), "????"))
+            else:
+                stream.write(u"\n")
+        except (Exception,) as E:
+            DBGmsg(u"AAH! ({}) ({})".format(key, val)+str(E)+u"\n")
+    DBGmsg(u"\nAnd done now.\n")
+
 
 def compressdict(dct):
     """Take a dict in usual form and *destructively* modify it so as to
@@ -149,10 +156,27 @@ def readfile(*files):
                     print("couldn't make sense of line: "+line)
                 else:
                     val=str(m.group(1))
-                # Can't otherwise distinguish between auto-inlines and custom...
-                m=re.search(r'## *(.*)$', line)
+                m=re.search(r'\s+(#+\s*)(.*?)\s*$', line)
                 if m:
-                    inline=str(m.group(1))
+                    inline=str(m.group(2))
+                    if len(val)==1:
+                        try:
+                            uuname=uniname(val)
+                            if inline.startswith(uuname):
+                                if inline[len(uuname):]:
+                                    inline = (u"*" + m.group(1) + u"{uname}" +
+                                              (inline[len(uuname):].
+                                               replace(u'{','{{').
+                                               replace(u'}','}}')))
+                                else:
+                                    inline=u""
+                            else:
+                                inline=m.group(1)+inline
+                        except ValueError:
+                            # No such name
+                            inline=m.group(1) + inline
+                    else:
+                        inline=m.group(1) + inline
                 else:
                     inline=u""
                 cur=listing
@@ -181,7 +205,7 @@ def readfile(*files):
 class ComposeFuse(fuse.Operations):
     # DBG=open(os.getenv('HOME')+os.sep+"XCOMPDBG","w")
 
-    fieldsep='-'
+    fieldsep='.'                # ExtFS-friendly!
 
     @debugfunc
     def init(self, *args):
